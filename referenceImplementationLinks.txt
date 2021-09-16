@@ -1,0 +1,2 @@
+Reference implementation: https://github.com/uptane/uptane
+POUF: https://github.com/uptane/POUFs/blob/master/POUF1.md
