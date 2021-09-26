@@ -161,7 +161,7 @@ one sig TimeServer {
 ------------------
 --- Operations ---
 ------------------
-enum Operator { SendMetadataToPrimary, SendMetadataToSecondaries, FullVerification, Nothing }
+enum Operator { SendMetadataToPrimary, SendMetadataToSecondaries, FullVerification, DoNothing }
 one sig Track{ var op: lone Operator }
 
 -- Write a new set of metadata
@@ -311,7 +311,7 @@ pred DoNothing[] {
 	out_primary' = out_primary
 	current_metadata' = current_metadata
 	new_metadata' = new_metadata
-	Track.op' = Nothing
+	Track.op' = DoNothing
 }
 
 -------------------------------
