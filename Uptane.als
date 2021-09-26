@@ -56,7 +56,8 @@ enum VerificationType { Full, Partial }
 --- IDs ---
 -----------
 abstract sig ID {}
-sig VehicleID, ECUId, KeyID extends ID {}
+sig VehicleID, ECUId extends ID {}
+sig KeyID extends ID {}
 
 
 --- Vehicle and ECU Data ---
