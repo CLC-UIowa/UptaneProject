@@ -179,10 +179,9 @@ pred NoChangeExceptPrimary[r: PrimaryECU -> univ, P: set PrimaryECU] {
 }
 
 pred SendMetadataToPrimary[d: DirectorRepo, p: PrimaryECU] {
+	-- NOTE-- should this be in batch? or one metadata file at a time?
 	--- Preconditions ---
 	-- The director sends a full set of metadata
-	#(d.out_primary) = 4 
-    one (d.out_primary & RootMetadata) 
 	one (d.out_primary & TargetsMetadata) 
 	one (d.out_primary & SnapshotMetadata) 
 	one (d.out_primary & TimestampMetadata)
@@ -232,20 +231,20 @@ pred FullVerification[p: PrimaryECU] {
 	-- Note 2: We need to have metadata from the director AND image repos.
 	-- Note 3: Need to deal with delegations. 
 	-- Note 4: Targets metadata ECU information? See "custom metadata about images"
+	-- Note 5: Should be able to take SecondaryECU as input
 	
 	---------------------
 	--- Preconditions ---
 	---------------------
 	-- new metadata is a full set of metadata
-	#(p.new_metadata) = 4 && 
-	one (p.new_metadata & RootMetadata) && 
-	one (p.new_metadata & TargetsMetadata) && 
-	one (p.new_metadata & SnapshotMetadata) && 
+	one (p.new_metadata & TargetsMetadata) 
+	one (p.new_metadata & SnapshotMetadata) 
 	one (p.new_metadata & TimestampMetadata)
 
 	-- Compare current snapshot metadata hashes and version to 
 	-- hashes and version in new timestamp (make sure there's a 
 	-- new update)
+
 	(p.current_metadata & SnapshotMetadata).hashes != 
 	(p.new_metadata & TimestampMetadata).snapshot_hashes.HashFunction
 	||
@@ -273,7 +272,7 @@ pred FullVerification[p: PrimaryECU] {
 	-- Target metadata version number should match the version number
 	-- listed in snapshot metadata
 	let t = (p.new_metadata & TargetsMetadata) |
-		t.version = SnapshotMetadata.targets_info[t]
+		t.version = (p.current_metadata & SnapshotMetadata).targets_info[t]
 
 	-- Check signature count (compare to threshold)
 	all m: Metadata | 
@@ -285,6 +284,8 @@ pred FullVerification[p: PrimaryECU] {
 	-- Check validity of signatures
 	all m: p.new_metadata | all s: m.signatures |
 		s.key in (p.current_metadata & RootMetadata).key_mapping[m.role]
+
+	-- Note-- same key doing multiple signatures?
 
 	-- Metadata cannot be expired
 	lt[

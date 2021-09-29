@@ -1,9 +1,9 @@
 # Uptane Electrum Model Documentation
 
-Link to Uptane standards document: https://uptane.github.io/papers/uptane-standard.1.1.0.pdf.
+Link to Uptane standards document: https://uptane.github.io/papers/uptane-standard.1.1.0.pdf.  
 Link to Uptane deployment best practices: https://uptane.github.io/papers/V1.2.0_uptane_deploy.pdf.   
 
-## Signatures and Relations
+## Signatures
 
 * **Repository** (abstract): Section 5 page 11-- "At a high level, Uptane requires: Two software repositories: An Image repository... A Director repository..."
   * **DirectorRepo** (one): see **Repository**
@@ -38,6 +38,40 @@ and signing roles on each repository."
 * **MyTime** (ordered): Represents a general notion of time.
 * **Track** (one): For modeling operators in Electrum
 
+## Relations
+
+* Repository
+  * DirectorRepo
+    * var **out_primary**: set Metadata-- Section 5.3.2.1 page 21: "The Director generates new metadata representing the desired set of images to be installed on the vehicle... It then sends this metadata to the Primary..." So, out_primary stores the set of metadata that the director wishes to send to the Primary ECU.
+* ECU
+  * var **current_metadata**: set Metadata-- For full and partial verification, each new metadata file of a certain role (Root, Targets, Snapshot, or Timestamp) is compared to the most recently downloaded version of that metadata. For example, section 5.4.4.4 page 32 says "Check that the version number of the previous Timestamp metadata file, if any, is less than or equal to the version number of this Timestamp metadata file." So, **current_metadata** refers to the most recently downloaded version, whereas **new_metadata** refers to the new metadata undergoing verification. 
+  * var **new_metadata**: set Metadata-- see **current_metadata**
+  * PrimaryECU
+    * var **out_secondaries**: set Metadata-- Section 5.4.2.6 page 25: "The Primary SHALL send its latest downloaded metadata to all of its associated Secondaries." The standards document does not mandate that all metadata must be sent to all secondaries, just the minimum metadata needed for verification. However, the best practices document (page 43) says "it is RECOMMENDED that a Primary use a broadcast network, such as CAN, CAN FD, or Ethernet to transmit metadata to all of its Secondaries at the same time." Currently, the model assumes that the Primary broadcasts information to all secondaries. I am not sure if the model should allow for unicasting.
+* Metadata: The standards document outlines components that should be present in all metadata files (section 5.2.1).
+  * **signatures**: set Signature-- Section 5.2.1 page 14: All metadata should contain "An attribute containing the signature(s) of the payload." The signatures are checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate).
+  * **signature_count**: SignatureCount-- We need to be able to measure the cardinality of the **signatures** field (or more precisely, an abstraction of that cardinality) to make sure that the metadata reaches some arbitrary number of signatures. This is checked during full verification, for example: "Check that it (the metadata) has been signed by the threshold of keys specified in the latest Root metadata file" (section 5.4.4.4 page 32). There is a difference between signature count and key count, as there could be multiple (redundant) signatures with the same key. So, we must somehow constrain the signature_count field to correlate with the number of unique signing keys. Maybe this relation should just be called key_count instead.
+  * **version**: Version-- Section 5.2.1 page 14: All metadata should contain "An integer version number, which SHOULD be incremented each time the metadata file is updated." The version numbers are checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). 
+  * **expiration**: MyTime-- Section 5.2.1 page 14: All metadata should contain "An expiration date and time." The expiration timestamps are checked during full verification (section 5.4.4.2, also see the **FullVerification** predicate). 
+  * **role**: Role-- Section 5.2.1 page 14: All metadata should contain "An indicator of the type of role (Root, Targets, Snapshot, or Timestamp)." This relation is not strictly necessary (because we have an Alloy signature for each metadata type), but it is used for convenience in writing predicate preconditions and postconditions.
+  * **hashes**: some Hash-- Various parts of full verification (5.4.4.2) involve cross-checking metadata hashes. For example, "Check that the non-custom metadata (i.e., length and hashes) of the unencrypted or encrypted image are the same in both sets of metadata" (page 30) and "Check the previously downloaded Snapshot metadata file from the Directory repository (if available). If the hashes and version number of that file match the hashes and version number listed in the new Timestamp metadata, there are no new updates and the verification process MAY be stopped and considered complete." Strictly speaking, we only need hashes for snapshot and targets metadata (as far as I can tell). But, it makes the most sense to me to include **hashes** as a general Metadata field, as it is needed by multiple types of Metadata and in theory, any type of Metadata can have one or more hashes.
+  * RootMetadata
+    * **key_mapping**: Role lone -> some MetadataKey-- Section 5.2.2 page 14: Root metadata should contain "A representation of the public keys for all four roles." The public keys are checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). 
+    * **signature_count_mapping**: Role -> one SignatureCount-- Section 5.2.2 page 14: Root metadata should contain "An attribute mapping each role to ... the threshold of signatures required for that role." Signature counts are checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). 
+  * TargetsMetadata
+    * **image_hashes**: Image -> some Hash-- Section 5.2.3 page 14: "The Targets metadata on a repository contains all of the information about images to be installed on ECUs. This includes... hashes..." Hashes are checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). 
+    * **image_filesizes**: Image -> one FileSize-- Section 5.2.3 page 14: "The Targets metadata on a repository contains all of the information about images to be installed on ECUs. This includes... file sizes..." File sizes are checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). 
+    * **delegations**: lone DelegationsMetadata-- Section 5.2.3 page 15: "Targets metadata can also contain metadata about delegations, allowing one Targets role to delegate its authority to another." Delegations are checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). 
+  * SnapshotMetadata
+    * **targets_info**: TargetsMetadata -> one Version-- Section 5.2.4 page 17: "The filename and version number of the Targets metadata file." Filenames are aliases for files, so the TargetsMetadata Alloy signature is used rather than a Filename signature. Targets information is checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). 
+  * TimestampMetadata
+    * **latest_snapshot**: SnapshotMetadata -> Version-- Section 5.2.5, page 17: Timestamp metadata must contain "The ... version number of the latest Snapshot metadata on the repository." The version number of the latest Snapshot metadata is checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). 
+    * **snapshot_hashes**: Hash -> one HashFunction-- Section 5.2.5, page 17: Timestamp metadata must contain "One or more hashes of the Snapshot metadata file, along with the hashing function used." The hashes of the latest Snapshot metadata is checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). Right now, I am unsure whether or not we need to keep track of hash functions.
+* TimeServer
+  * var **current_time**: MyTime-- Section 5.4 page 22: "ECUs MUST have a secure source of time. An OEM/Uptane implementer MAY use any external source of time that is demonstrably secure. The Uptane De- ployment Best Practices document ([DEPLOY]) describes one way to implement an external time server to cryptographically attest time, as well as the security properties required." This time is checked during full verification (section 5.4.4.2, also see the **FullVerification** predicate). I am not sure how much effort we should put into modeling the time server given that it is an implementation choice.
+* Track
+  * var **op**: lone Operator-- used to keep track of the operator just applied to the system.
+
 ## Enums
 
 * **VerificationType**: Section 5.4.4 page 28-- "A Primary ECU MUST perform full verification of metadata. A Secondary ECU SHOULD perform full verification of metadata. If a Secondary cannot perform full verification, it SHALL, at the very least, perform partial verification."
@@ -58,16 +92,39 @@ and signing roles on each repository."
 
 * **SendMetadataToPrimary**: Section 5.3.2.1 page 21-- "The Director generates new metadata representing the desired set of images to be installed on the vehicle... It then sends this metadata to the Primary..."
   * **Preconditions**:
+    * **The Director's out_primary field contains one Targets Metadata File**-- Section 5.3.2.1 describes how the Director directs installation of images, and on page 21 it notes that the metadata generated "includes Targets (Section 5.2.3), Snapshot (Section 5.2.4), and Timestamp (Section 5.2.5) metadata. It then sends this metadata to the Primary as described in Section 5.4.2.3."
+  	* **The Director's out_primary field contains one Snapshots Metadata File**-- see previous 
+    * **The Director's out_primary field contains one Timestamp Metadata File**-- see previous
   * **Postconditions**:
+    * **The Primary ECU receives the metadata in its new_metadata field.**
   * **Frame conditions**:
+    * **Besides previously discussed postconditions, nothing else changes.**
 * **SendMetadataToSecondaries**: Section 5.4.2.6 page 25-- "The Primary SHALL send its latest downloaded metadata to all of its associated Secondaries." The standards document does not mandate that all metadata must be sent to all secondaries, just the minimum metadata needed for verification. However, the best practices document (page 43) says "it is RECOMMENDED that a Primary use a broadcast network, such as CAN, CAN FD, or Ethernet to transmit metadata to all of its Secondaries at the same time."
   * **Preconditions**:
+    * **The Director's out_primary field contains one Root Metadata File**-- Section 5.4.2.6 says "The metadata it sends to each Secondary MUST include all of the metadata required for verification on that Secondary. For full verification Secondaries, this includes the metadata for all four roles from both repositories.. For partial verification Secondaries, this MAY include... at a minimum, ... only the Targets metadata file from the Director repository." As described in **SendMetadataToSecondaries**, this model assumes metadata broadcasting, where all metadata is broadcasted to all secondaries. This means that the latest copies of Root, Targets, Snapshot, and Timestamp should all be present.
+    * **The Director's out_primary field contains one Targets Metadata File**-- see previous
+    * **The Director's out_primary field contains one Snapshot Metadata File**-- see previous
+    * **The Director's out_primary field contains one Timestamp Metadata File**-- see previous
   * **Postconditions**:
+    * **The Secondary ECUs receive the metadata in their new_metadata fields.**
   * **Frame conditions**:
+    * **Besides previously discussed postconditions, nothing else changes.**
 * **FullVerification**: Described in section 5.4.4.2, page 29. Also, section 5.4.4, page 28 says "A Primary ECU MUST perform full verification of metadata. A Secondary ECU SHOULD perform full verification of metadata."
   * **Preconditions**:
+    * **The Director's out_primary field contains one Targets Metadata File**
+    * **The Director's out_primary field contains one Snapshot Metadata File**
+    * **The Director's out_primary field contains one Timestamp Metadata File**
+    * **The hashes and version of the current Snapshot Metadata match those specified in the new Timestamp Metadata.**
+    * **The new Targets metadata should contain a positive number of image hashes.**
+    * **The new Snapshots metadata should not reference Targets Metadata with an older version number.**
+    * **All new metadata should be a newer version than the current metadata for the corresponding role.**
+    * **The Targets Metadata version number should match the version number specified in the current Snapshot Metadata.**
+    * **Each Metadata must reach a threshold signature count from valid keys.**
+    * **Metata cannot have an expiration timestamp that is before the current time.**
   * **Postconditions**:
+    * **The ECU's current_metadata field is updated to the new metadata.**
   * **Frame conditions**:
+    * **Besides previously discussed postconditions, nothing else changes.**
 * **DoNothing**: Does nothing. Allows the system to loop on the final state.
 * **Init**: Currently, no initial state conditions are set.
 * **Trans**: There must be an operator applied between each pair of states.
