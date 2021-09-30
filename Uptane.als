@@ -348,7 +348,9 @@ fact Scheduler {
 }
 
 fact {
-	-- These should be consequences of the operators (assertions), rather than facts
+	-- Different files should produce different hashes
+	-- But, this isn't necessarily true? Only most of the time :)
+
 
 	--- Metadata Constraints ---
 	-- Roles correspond to metadata types
@@ -356,21 +358,68 @@ fact {
 		(m.role = Root => m in RootMetadata) &&
 		(m.role = Targets => m in TargetsMetadata) &&
 		(m.role = Timestamp => m in TimestampMetadata) &&
-		(m.role = Snapshot => m in SnapshotMetadata) 
+		(m.role = Snapshot => m in SnapshotMetadata) 	
 
+
+	-- Make generic metadata rule for any pair of metadata,
+	-- #set Signature 1 > #set Signature 2 iff
+	-- signature_count 1 > signature_count 2
+	-- Then, we can compare generic signature count in Metadata to threshold signature count in root
+
+	--- Time Server Constraints ---
+	-- Time always moves forward unless we're looping at the last time
+	always (lt[TimeServer.current_time, TimeServer.current_time'] or
+		   (TimeServer.current_time = last and TimeServer.current_time' = last))
+
+	--- Other constraints ---
+	-- The signature count field correlates with the cardinality of the signatures field
+	always all disj m1, m2: Metadata | (#(m1.signatures) < #(m2.signatures)) => 
+	                                   lt [m1.signature_count, m2.signature_count] 
+}
+
+run { 
+		eventually Track.op = SendMetadataToPrimary 
+		eventually Track.op = SendMetadataToSecondaries
+		eventually Track.op = FullVerification
+	} for 10
+
+
+assert A_a {
 	-- Targets metadata must have one or more associated images
 	always all t : TargetsMetadata | some t.image_hashes && some t.image_filesizes
-	
+}
+check A_a for 15
+
+assert A_b {
 	-- The Targets hashes and filesizes relations must refer to the same set of images
 	always all t : TargetsMetadata | t.image_hashes.Hash = t.image_filesizes.FileSize
+}
+check A_b for 15
 
+assert A_c {
 	-- Snapshot metadata has info about all targets metadata in repo
 	always all s : SnapshotMetadata | s.targets_info.Version = TargetsMetadata
+}
+check A_c for 15
 
+assert A_d {
 	-- Each timestamp metadata file keeps track of one latest snapshot metadata file
 	-- and contains a non-zero number of hashes for that file
-	always all t : TimestampMetadata | one t.latest_snapshot && some t.snapshot_hashes	
+	always all t : TimestampMetadata | one t.latest_snapshot && some t.snapshot_hashes
+}
+check A_d for 15
 
+assert A_e {
+    -- Primary ECUs always have a full set of metadata
+	always all p : PrimaryECU | #(p.current_metadata) = 4 && 
+								  one (p.current_metadata & RootMetadata) && 
+								  one (p.current_metadata & TargetsMetadata) && 
+								  one (p.current_metadata & SnapshotMetadata) && 
+								  one (p.current_metadata & TimestampMetadata)
+}
+check A_e for 15
+
+assert A_f {
 	-- The director repository always either sends a full set of metadata to the primary ECU,
     -- or sends nothing
 	always all d : DirectorRepo | no d.out_primary ||
@@ -381,29 +430,5 @@ fact {
 								  	  one (d.out_primary & SnapshotMetadata) && 
 								  	  one (d.out_primary & TimestampMetadata)
 								  )
-
-    -- Primary ECUs always have a full set of metadata
-	always all p : PrimaryECU | #(p.current_metadata) = 4 && 
-								  one (p.current_metadata & RootMetadata) && 
-								  one (p.current_metadata & TargetsMetadata) && 
-								  one (p.current_metadata & SnapshotMetadata) && 
-								  one (p.current_metadata & TimestampMetadata)
-
-	-- Make generic metadata rule for any pair of metadata,
-	-- #set Signature 1 > #set Signature 2 iff
-	-- signature_count 1 > signature_count 2
-	-- Then, we can compare generic signature count in Metadata to threshold signature count in root
-
-	--- Time Server Constraints ---
-	always lte[TimeServer.current_time, TimeServer.current_time'] 
-
-	--- Other constraints ---
-	always all disj m1, m2: Metadata | (#(m1.signatures) < #(m2.signatures)) => 
-	                                   lt [m1.signature_count, m2.signature_count] 
 }
-
-run { 
-		eventually Track.op = SendMetadataToPrimary 
-		eventually Track.op = SendMetadataToSecondaries
-		eventually Track.op = FullVerification
-	} for 10
+check A_f for 15
