@@ -21,18 +21,19 @@ open util/ordering[MyTime]
 -- 6. Model getting too big to look at in the inspector
 -- 7. How does reporting failures work if preconditions must be met for transitions to take place
 
+
 -- Ordered relations: Version number, signature count, time stamp, file size
 -- Links that are skipped because they are aliases-- file name, key ID (?), MAYBE hash
 
 -------------------------
 --- Components/actors ---
 -------------------------
-abstract sig Repository {}
-one sig DirectorRepo extends Repository {
+abstract sig Repository {
 	var out_primary: set Metadata,
 }
+one sig DirectorRepo extends Repository {
+}
 one sig ImageRepo extends Repository  {
-	-- metadata
 	--database: set Image,
 	--var out_primary: set Metadata,
 }
@@ -161,7 +162,7 @@ one sig TimeServer {
 ------------------
 --- Operations ---
 ------------------
-enum Operator { SendMetadataToPrimary, SendMetadataToSecondaries, FullVerification, DoNothing }
+enum Operator { SendMetadataToPrimary, SendMetadataToSecondaries, FullVerification, FullVerificationRoot, DoNothing }
 one sig Track{ var op: lone Operator }
 
 -- Write a new set of metadata
@@ -178,27 +179,28 @@ pred NoChangeExceptPrimary[r: PrimaryECU -> univ, P: set PrimaryECU] {
 	all p: PrimaryECU - P | p.r' = p.r
 }
 
-pred SendMetadataToPrimary[d: DirectorRepo, p: PrimaryECU] {
+pred SendMetadataToPrimary[r: Repository, p: PrimaryECU] {
 	-- NOTE-- should this be in batch? or one metadata file at a time?
 	--- Preconditions ---
 	-- The director sends a full set of metadata
-	one (d.out_primary & TargetsMetadata) 
-	one (d.out_primary & SnapshotMetadata) 
-	one (d.out_primary & TimestampMetadata)
+	one (r.out_primary & TargetsMetadata) 
+	one (r.out_primary & SnapshotMetadata) 
+	one (r.out_primary & TimestampMetadata)
 								  
 
 	--- Postconditions ---
 	-- Update out_primary field of Director
-	no d.out_primary'
+	no r.out_primary'
 	-- Update new_metadata field of primary ECU
-	p.new_metadata' = d.out_primary
+	p.new_metadata' = r.out_primary
 	Track.op' = SendMetadataToPrimary
 
 	--- Frame conditions ---
-	NoChangeExceptDirector[out_primary, d]
+	NoChangeExceptDirector[out_primary, r]
 	NoChangeExceptPrimary[current_metadata, none]
 	NoChangeExceptPrimary[new_metadata, p]	
 	NoChangeExceptPrimary[out_secondaries, none]
+--	NoChangeExceptPrimary[out_secondaries, none]
 }
 
 pred SendMetadataToSecondaries[p: PrimaryECU, S: set SecondaryECU] {
@@ -225,13 +227,82 @@ pred SendMetadataToSecondaries[p: PrimaryECU, S: set SecondaryECU] {
 	NoChangeExceptPrimary[out_secondaries, p]
 }
 
+pred FullVerificationRoot[p: PrimaryECU] {
+	-- If there is no new root metadata, that is OK
+	-- Maybe for this, we will introduce another predicate
+
+
+	---------------------
+	--- Preconditions ---
+	---------------------
+
+	-- Check signature count with current and new root metadata (compare to threshold)
+	gte[
+		(p.new_metadata & RootMetadata).signature_count, 
+       ((p.current_metadata & RootMetadata).signature_count_mapping)[Root]
+	]
+
+	gte[
+		(p.new_metadata & RootMetadata).signature_count, 
+       ((p.new_metadata & RootMetadata).signature_count_mapping)[Root]
+	]
+
+	-- Check validity of signatures with current and new root metadata
+	all s: (p.new_metadata & RootMetadata).signatures |
+		s.key in (p.current_metadata & RootMetadata).key_mapping[Root]
+
+	all s: (p.new_metadata & RootMetadata).signatures |
+		s.key in (p.new_metadata & RootMetadata).key_mapping[Root]
+
+	-- Check version number
+	lte[ 
+		(p.new_metadata & RootMetadata).version, 
+    	(p.current_metadata & RootMetadata).version 
+  	]
+
+	-- Check expiration timestamp
+	lt[
+		TimeServer.current_time,
+	   (p.new_metadata & RootMetadata).expiration
+	]
+		
+
+	----------------------
+	--- Postconditions ---
+	----------------------
+
+	-- Update to the latest version of Root metadata
+	(p.current_metadata' & RootMetadata) = (p.new_metadata & RootMetadata)
+
+	-- If Timestamp or Snapshot keys have been rotated, delete those metadata files
+	((p.new_metadata & RootMetadata).key_mapping[Timestamp] !=
+	 (p.current_metadata & RootMetadata).key_mapping[Timestamp]) =>
+	(p.current_metadata' & TimestampMetadata) = none
+
+	((p.new_metadata & RootMetadata).key_mapping[Snapshot] !=
+	 (p.current_metadata & RootMetadata).key_mapping[Snapshot]) =>
+	(p.current_metadata' & SnapshotMetadata) = none
+
+	Track.op' = FullVerificationRoot
+
+
+	------------------------
+	--- Frame Conditions ---
+	------------------------
+
+	NoChangeExceptDirector[out_primary, none]
+	NoChangeExceptPrimary[current_metadata,p]
+	NoChangeExceptPrimary[new_metadata, none]
+	NoChangeExceptPrimary[out_secondaries, none]
+
+}
+
 pred FullVerification[p: PrimaryECU] {
-	-- Note 1: Root needs to be updated first-- will need its own predicate. This will also include
-	--         extra signature checks and potential deletion of previous metadata files.
-	-- Note 2: We need to have metadata from the director AND image repos.
-	-- Note 3: Need to deal with delegations. 
-	-- Note 4: Targets metadata ECU information? See "custom metadata about images"
-	-- Note 5: Should be able to take SecondaryECU as input
+	-- Note 1: We need to have metadata from the director AND image repos (maybe take in repo as argument).
+	-- Note 2: Need to deal with delegations. 
+	-- Note 3: Targets metadata ECU information? See "custom metadata about images"
+	-- Note 4: Should be able to take SecondaryECU as input
+	-- Note 5: Need to be able to handle cases where current metadata does not exist
 	
 	---------------------
 	--- Preconditions ---
@@ -244,7 +315,6 @@ pred FullVerification[p: PrimaryECU] {
 	-- Compare current snapshot metadata hashes and version to 
 	-- hashes and version in new timestamp (make sure there's a 
 	-- new update)
-
 	(p.current_metadata & SnapshotMetadata).hashes != 
 	(p.new_metadata & TimestampMetadata).snapshot_hashes.HashFunction
 	||
@@ -261,13 +331,13 @@ pred FullVerification[p: PrimaryECU] {
 			(p.new_metadata & SnapshotMetadata).targets_info[t]
 		]
 
-	-- New metadata is a newer version
+	-- New metadata is not older version
 	all m1: p.current_metadata | all m2: p.new_metadata |
 		(m1.role = m2.role) =>
-		lt[ 
+		lte[ 
 			m1.version, 
     		m2.version 
-  		]
+  		] 
 
 	-- Target metadata version number should match the version number
 	-- listed in snapshot metadata
@@ -275,10 +345,11 @@ pred FullVerification[p: PrimaryECU] {
 		t.version = (p.current_metadata & SnapshotMetadata).targets_info[t]
 
 	-- Check signature count (compare to threshold)
+
 	all m: Metadata | 
 		gte[
 			m.signature_count, 
-            ((p.new_metadata & RootMetadata).signature_count_mapping)[m.role]
+            ((p.current_metadata & RootMetadata).signature_count_mapping)[m.role]
 		]
 
 	-- Check validity of signatures
@@ -289,7 +360,7 @@ pred FullVerification[p: PrimaryECU] {
 
 	-- Metadata cannot be expired
 	lt[
-		TimeServer.current_time,
+		TimeServer.current_time, 
 		(p.new_metadata).expiration
 	]
 
@@ -297,14 +368,14 @@ pred FullVerification[p: PrimaryECU] {
 	--- Postconditions ---
 	----------------------
 	p.current_metadata' = p.new_metadata
-	no p.new_metadata' -- Look in to this
+	Track.op' = FullVerification
 	
 	------------------------
 	--- Frame Conditions ---
 	------------------------
 	NoChangeExceptDirector[out_primary, none]
 	NoChangeExceptPrimary[current_metadata,p]
-	NoChangeExceptPrimary[new_metadata, p]
+	NoChangeExceptPrimary[new_metadata, none]
 	NoChangeExceptPrimary[out_secondaries, none]
 }
 
@@ -320,6 +391,7 @@ pred DoNothing[] {
 -------------------------------
 pred Init [] {
  -- to do
+	-- The ECUs should have some initial metadata
 }
 
 ---------------------------
@@ -329,7 +401,8 @@ pred Trans [] {
     (some p: PrimaryECU | 
         SendMetadataToPrimary[DirectorRepo, p] ||
 		SendMetadataToSecondaries[p, SecondaryECU] ||
-		FullVerification[p])
+		FullVerification[p] ||
+		FullVerificationRoot[p])
 
 		||
        
@@ -353,7 +426,8 @@ fact {
 
 
 	--- Metadata Constraints ---
-	-- Roles correspond to metadata types
+	-- Roles correspond to metadata types-- this is purely to provide a shorthand
+	-- for some pre/postconditions; the role field is not strictly necessary
 	always all m : Metadata |
 		(m.role = Root => m in RootMetadata) &&
 		(m.role = Targets => m in TargetsMetadata) &&
@@ -380,7 +454,8 @@ fact {
 run { 
 		eventually Track.op = SendMetadataToPrimary 
 		eventually Track.op = SendMetadataToSecondaries
-		eventually Track.op = FullVerification
+		eventually Track.op = FullVerificationRoot
+		eventually Track.op = FullVerification	
 	} for 10
 
 
