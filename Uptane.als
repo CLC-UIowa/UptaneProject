@@ -110,7 +110,8 @@ abstract sig Metadata {
 	version: Version,
 	expiration: MyTime,
 	role: Role,
-	hashes: some Hash
+	hashes: some Hash,
+	source: Repository,
 }
 sig RootMetadata extends Metadata {
 	-- public_keys: set Key,
@@ -162,14 +163,17 @@ one sig TimeServer {
 ------------------
 --- Operations ---
 ------------------
-enum Operator { SendMetadataToPrimary, SendMetadataToSecondaries, FullVerification, FullVerificationRoot, DoNothing }
-one sig Track{ var op: lone Operator }
+enum Operator { SendMetadataToPrimary, SendMetadataToSecondaries, 
+                FullVerification, FullVerificationTargetsMatch,
+                FullVerificationRoot, FullVerificationTargets, 
+                FullVerificationTimestamp, FullVerificationSnapshot,
+                DoNothing }
+enum Status { Abort, Success }
 
--- Write a new set of metadata
--- Send set of metadata from Director to ECUs
--- Send set of metadata from Primary ECU to Secondary ECUs
--- Full verification of a metadata set
--- Partial verification of a metadata set
+one sig Track { 
+	var op: lone Operator,
+	var status: Status,
+}
 
 pred NoChangeExceptDirector[r: DirectorRepo -> univ, D: set DirectorRepo] {
 	all d: DirectorRepo - D | d.r' = d.r
@@ -200,13 +204,11 @@ pred SendMetadataToPrimary[r: Repository, p: PrimaryECU] {
 	NoChangeExceptPrimary[current_metadata, none]
 	NoChangeExceptPrimary[new_metadata, p]	
 	NoChangeExceptPrimary[out_secondaries, none]
---	NoChangeExceptPrimary[out_secondaries, none]
 }
 
 pred SendMetadataToSecondaries[p: PrimaryECU, S: set SecondaryECU] {
 	--- Preconditions ---
 	-- The primary must be broadcasting to all secondaries (?)
---	S = SecondaryECU
 	#(p.out_secondaries) = 4 
     one (p.out_secondaries & RootMetadata) 
 	one (p.out_secondaries & TargetsMetadata) 
@@ -227,50 +229,243 @@ pred SendMetadataToSecondaries[p: PrimaryECU, S: set SecondaryECU] {
 	NoChangeExceptPrimary[out_secondaries, p]
 }
 
+pred FullVerificationPreconditions[p: PrimaryECU, m1: Metadata, m2: Metadata, root: RootMetadata] {
+	-- New metadata is not older version
+	lte[ 
+		m1.version, 
+    	m2.version 
+  	] 
+
+	-- Check signature count (compare to threshold)
+	gte[
+		m2.signature_count, 
+        (root.signature_count_mapping)[m2.role]
+	]
+
+	-- Check validity of signatures
+	all s: m2.signatures |
+		s.key in root.key_mapping[m2.role]
+
+	-- Note-- same key doing multiple signatures?
+
+	-- Metadata cannot be expired
+	lt[
+		TimeServer.current_time, 
+		m2.expiration
+	]
+}
+
+pred FullVerificationTargetsMatch[p: PrimaryECU] {
+	---------------------
+	--- Preconditions ---
+	---------------------
+
+	// Image hashes and filesizes of both targets metadata files need to match
+	((p.new_metadata & TargetsMetadata) & (source.DirectorRepo)).image_hashes = 
+	((p.new_metadata & TargetsMetadata) & (source.ImageRepo)).image_hashes 
+
+	((p.new_metadata & TargetsMetadata) & (source.DirectorRepo)).image_filesizes = 
+	((p.new_metadata & TargetsMetadata) & (source.ImageRepo)).image_filesizes 
+
+
+	----------------------
+	--- Postconditions ---
+	----------------------
+
+	Track.op' = FullVerificationTargetsMatch
+
+
+	------------------------
+	--- Frame Conditions ---
+	------------------------
+
+	NoChangeExceptDirector[out_primary, none]
+	NoChangeExceptPrimary[current_metadata, none]
+	NoChangeExceptPrimary[new_metadata, none]
+	NoChangeExceptPrimary[out_secondaries, none]
+}
+
+pred FullVerificationTargets[p: PrimaryECU] {
+	---------------------
+	--- Preconditions ---
+	---------------------
+	-- Add absolute preconditions here
+
+	----------------------
+	--- Postconditions ---
+	----------------------
+	(
+		FullVerificationPreconditions[p, 
+                                 	(p.current_metadata & TargetsMetadata),
+                                 	(p.new_metadata & TargetsMetadata),
+								 	(p.current_metadata & RootMetadata)]
+
+		and
+
+		-- Make sure there are targets
+		some (p.new_metadata & TargetsMetadata).image_hashes
+	)
+	implies
+	Track.status' = Success
+	else
+	Track.status' = Abort
+
+	Track.op' = FullVerificationTargets
+	------------------------
+	--- Frame Conditions ---
+	------------------------
+
+	NoChangeExceptDirector[out_primary, none]
+	NoChangeExceptPrimary[current_metadata,none]
+	NoChangeExceptPrimary[new_metadata, none]
+	NoChangeExceptPrimary[out_secondaries, none]
+}
+
+pred FullVerificationTimestamp[p: PrimaryECU] {
+	---------------------
+	--- Preconditions ---
+	---------------------
+	-- Add absolute preconditions here
+
+	----------------------
+	--- Postconditions ---
+	----------------------
+	(
+		FullVerificationPreconditions[p, 
+                               	     (p.current_metadata & TimestampMetadata),
+                              	     (p.new_metadata & TimestampMetadata),
+									 (p.current_metadata & RootMetadata)]
+	)
+	implies
+	Track.status' = Success
+	else
+	Track.status' = Abort
+
+	Track.op' = FullVerificationTimestamp
+
+	------------------------
+	--- Frame Conditions ---
+	------------------------
+
+	NoChangeExceptDirector[out_primary, none]
+	NoChangeExceptPrimary[current_metadata,none]
+	NoChangeExceptPrimary[new_metadata, none]
+	NoChangeExceptPrimary[out_secondaries, none]
+}
+
+pred FullVerificationSnapshot[p: PrimaryECU] {
+	---------------------
+	--- Preconditions ---
+	---------------------
+	-- Add absolute preconditions here
+
+	----------------------
+	--- Postconditions ---
+	----------------------
+	(
+		FullVerificationPreconditions[p, 
+	                                 (p.current_metadata & SnapshotMetadata),
+	                                 (p.new_metadata & SnapshotMetadata),
+									 (p.current_metadata & RootMetadata)]
+
+		and
+	
+		-- Compare current snapshot metadata hashes and version to 
+		-- hashes and version in new timestamp (make sure there's a 
+		-- new update)
+		
+	   ((p.current_metadata & SnapshotMetadata).hashes != 
+		(p.new_metadata & TimestampMetadata).snapshot_hashes.HashFunction
+		||
+		(p.current_metadata & SnapshotMetadata).version != 
+		(p.new_metadata & TimestampMetadata).latest_snapshot[SnapshotMetadata])
+
+		and
+	
+		-- Make sure version numbers of targets in the snapshots metadata do not decrease
+		all t: (p.current_metadata & SnapshotMetadata).targets_info.Version |
+			lte[
+				(p.current_metadata & SnapshotMetadata).targets_info[t],
+				(p.new_metadata & SnapshotMetadata).targets_info[t]
+			]
+
+		and
+	
+		-- Target metadata version number should match the version number
+		-- listed in snapshot metadata
+		let t = (p.new_metadata & TargetsMetadata) |
+			t.version = (p.current_metadata & SnapshotMetadata).targets_info[t]
+	)
+	implies
+	Track.status' = Success
+	else
+	Track.status' = Abort
+
+	Track.op' = FullVerificationSnapshot
+
+	------------------------
+	--- Frame Conditions ---
+	------------------------
+
+	NoChangeExceptDirector[out_primary, none]
+	NoChangeExceptPrimary[current_metadata,none]
+	NoChangeExceptPrimary[new_metadata, none]
+	NoChangeExceptPrimary[out_secondaries, none]
+}
+
 pred FullVerificationRoot[p: PrimaryECU] {
 	-- If there is no new root metadata, that is OK
-	-- Maybe for this, we will introduce another predicate
+	-- Maybe for this, we will introduce another predicate(?)
 
 
 	---------------------
 	--- Preconditions ---
 	---------------------
-
-	-- Check signature count with current and new root metadata (compare to threshold)
-	gte[
-		(p.new_metadata & RootMetadata).signature_count, 
-       ((p.current_metadata & RootMetadata).signature_count_mapping)[Root]
-	]
-
-	gte[
-		(p.new_metadata & RootMetadata).signature_count, 
-       ((p.new_metadata & RootMetadata).signature_count_mapping)[Root]
-	]
-
-	-- Check validity of signatures with current and new root metadata
-	all s: (p.new_metadata & RootMetadata).signatures |
-		s.key in (p.current_metadata & RootMetadata).key_mapping[Root]
-
-	all s: (p.new_metadata & RootMetadata).signatures |
-		s.key in (p.new_metadata & RootMetadata).key_mapping[Root]
-
-	-- Check version number
-	lte[ 
-		(p.new_metadata & RootMetadata).version, 
-    	(p.current_metadata & RootMetadata).version 
-  	]
-
-	-- Check expiration timestamp
-	lt[
-		TimeServer.current_time,
-	   (p.new_metadata & RootMetadata).expiration
-	]
+	-- Add absolute preconditions here
 		
 
 	----------------------
 	--- Postconditions ---
 	----------------------
 
+	(
+		FullVerificationPreconditions[p, 
+	                                 (p.current_metadata & RootMetadata),
+	                                 (p.new_metadata & RootMetadata),
+									 (p.current_metadata & RootMetadata)]
+
+		and
+
+		-- Check signature count with current and new root metadata (compare to threshold)
+		gte[
+			(p.new_metadata & RootMetadata).signature_count, 
+	       ((p.current_metadata & RootMetadata).signature_count_mapping)[Root]
+		]
+	
+		and
+		
+		gte[
+			(p.new_metadata & RootMetadata).signature_count, 
+	       ((p.new_metadata & RootMetadata).signature_count_mapping)[Root]
+		]
+	
+		and
+
+		-- Check validity of signatures with current and new root metadata
+		all s: (p.new_metadata & RootMetadata).signatures |
+			s.key in (p.current_metadata & RootMetadata).key_mapping[Root]
+	
+		and
+
+		all s: (p.new_metadata & RootMetadata).signatures |
+			s.key in (p.new_metadata & RootMetadata).key_mapping[Root]
+	
+	)
+	implies
+	Track.status' = Success
+	else
+	Track.status' = Abort
+	
 	-- Update to the latest version of Root metadata
 	(p.current_metadata' & RootMetadata) = (p.new_metadata & RootMetadata)
 
@@ -294,7 +489,6 @@ pred FullVerificationRoot[p: PrimaryECU] {
 	NoChangeExceptPrimary[current_metadata,p]
 	NoChangeExceptPrimary[new_metadata, none]
 	NoChangeExceptPrimary[out_secondaries, none]
-
 }
 
 pred FullVerification[p: PrimaryECU] {
@@ -312,57 +506,6 @@ pred FullVerification[p: PrimaryECU] {
 	one (p.new_metadata & SnapshotMetadata) 
 	one (p.new_metadata & TimestampMetadata)
 
-	-- Compare current snapshot metadata hashes and version to 
-	-- hashes and version in new timestamp (make sure there's a 
-	-- new update)
-	(p.current_metadata & SnapshotMetadata).hashes != 
-	(p.new_metadata & TimestampMetadata).snapshot_hashes.HashFunction
-	||
-	(p.current_metadata & SnapshotMetadata).version != 
-	(p.new_metadata & TimestampMetadata).latest_snapshot[SnapshotMetadata]	
-
-	-- Make sure there are targets
-	some (p.new_metadata & TargetsMetadata).image_hashes
-
-	-- Make sure version numbers of targets in the snapshots metadata do not decrease
-	all t: (p.current_metadata & SnapshotMetadata).targets_info.Version |
-		lte[
-			(p.current_metadata & SnapshotMetadata).targets_info[t],
-			(p.new_metadata & SnapshotMetadata).targets_info[t]
-		]
-
-	-- New metadata is not older version
-	all m1: p.current_metadata | all m2: p.new_metadata |
-		(m1.role = m2.role) =>
-		lte[ 
-			m1.version, 
-    		m2.version 
-  		] 
-
-	-- Target metadata version number should match the version number
-	-- listed in snapshot metadata
-	let t = (p.new_metadata & TargetsMetadata) |
-		t.version = (p.current_metadata & SnapshotMetadata).targets_info[t]
-
-	-- Check signature count (compare to threshold)
-
-	all m: Metadata | 
-		gte[
-			m.signature_count, 
-            ((p.current_metadata & RootMetadata).signature_count_mapping)[m.role]
-		]
-
-	-- Check validity of signatures
-	all m: p.new_metadata | all s: m.signatures |
-		s.key in (p.current_metadata & RootMetadata).key_mapping[m.role]
-
-	-- Note-- same key doing multiple signatures?
-
-	-- Metadata cannot be expired
-	lt[
-		TimeServer.current_time, 
-		(p.new_metadata).expiration
-	]
 
 	----------------------
 	--- Postconditions ---
@@ -374,7 +517,7 @@ pred FullVerification[p: PrimaryECU] {
 	--- Frame Conditions ---
 	------------------------
 	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata,p]
+	NoChangeExceptPrimary[current_metadata, p]
 	NoChangeExceptPrimary[new_metadata, none]
 	NoChangeExceptPrimary[out_secondaries, none]
 }
@@ -399,14 +542,19 @@ pred Init [] {
 ---------------------------
 pred Trans [] {
     (some p: PrimaryECU | 
-        SendMetadataToPrimary[DirectorRepo, p] ||
-		SendMetadataToSecondaries[p, SecondaryECU] ||
-		FullVerification[p] ||
-		FullVerificationRoot[p])
+        SendMetadataToPrimary[DirectorRepo, p] or
+		SendMetadataToSecondaries[p, SecondaryECU] or
+		FullVerification[p] or
+		FullVerificationRoot[p] or
+		FullVerificationTargets[p] or
+		FullVerificationSnapshot[p] or
+		FullVerificationTimestamp[p] or
+		FullVerificationTargetsMatch[p]
+	)
 
-		||
+	or
        
-	    DoNothing[]
+	DoNothing[]
 }
 
 -----------------
@@ -414,15 +562,17 @@ pred Trans [] {
 -----------------
 
 -- All traces are according to the scheduler
-fact Scheduler {
+-- Can make this a predicate, and make assertions in terms of the predicate
+pred Scheduler {
   Init and always Trans
 
   Track.op = none
 }
 
-fact {
+pred Environment {
 	-- Different files should produce different hashes
 	-- But, this isn't necessarily true? Only most of the time :)
+	-- Could 
 
 
 	--- Metadata Constraints ---
@@ -461,18 +611,21 @@ run {
 
 assert A_a {
 	-- Targets metadata must have one or more associated images
+	(Scheduler and Environment) => 
 	always all t : TargetsMetadata | some t.image_hashes && some t.image_filesizes
 }
 check A_a for 15
 
 assert A_b {
 	-- The Targets hashes and filesizes relations must refer to the same set of images
+	(Scheduler and Environment) => 
 	always all t : TargetsMetadata | t.image_hashes.Hash = t.image_filesizes.FileSize
 }
 check A_b for 15
 
 assert A_c {
 	-- Snapshot metadata has info about all targets metadata in repo
+	(Scheduler and Environment) => 
 	always all s : SnapshotMetadata | s.targets_info.Version = TargetsMetadata
 }
 check A_c for 15
@@ -480,12 +633,14 @@ check A_c for 15
 assert A_d {
 	-- Each timestamp metadata file keeps track of one latest snapshot metadata file
 	-- and contains a non-zero number of hashes for that file
+	(Scheduler and Environment) => 
 	always all t : TimestampMetadata | one t.latest_snapshot && some t.snapshot_hashes
 }
 check A_d for 15
 
 assert A_e {
     -- Primary ECUs always have a full set of metadata
+	(Scheduler and Environment) => 
 	always all p : PrimaryECU | #(p.current_metadata) = 4 && 
 								  one (p.current_metadata & RootMetadata) && 
 								  one (p.current_metadata & TargetsMetadata) && 
@@ -497,6 +652,7 @@ check A_e for 15
 assert A_f {
 	-- The director repository always either sends a full set of metadata to the primary ECU,
     -- or sends nothing
+	(Scheduler and Environment) => 
 	always all d : DirectorRepo | no d.out_primary ||
 								  (
 								      #(d.out_primary) = 4 && 

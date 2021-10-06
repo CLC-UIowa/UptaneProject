@@ -3,6 +3,9 @@
 Link to Uptane standards document: https://uptane.github.io/papers/uptane-standard.1.1.0.pdf.  
 Link to Uptane deployment best practices: https://uptane.github.io/papers/V1.2.0_uptane_deploy.pdf.   
 
+NOTE: This documentation may lag a little bit behind what is in the Electrum model; I will
+update it ASAP.
+
 ## Signatures
 
 * **Repository** (abstract): Section 5 page 11-- "At a high level, Uptane requires: Two software repositories: An Image repository... A Director repository..."
@@ -54,6 +57,8 @@ and signing roles on each repository."
   * **expiration**: MyTime-- Section 5.2.1 page 14: All metadata should contain "An expiration date and time." The expiration timestamps are checked during full verification (section 5.4.4.2, also see the **FullVerification** predicate). 
   * **role**: Role-- Section 5.2.1 page 14: All metadata should contain "An indicator of the type of role (Root, Targets, Snapshot, or Timestamp)." This relation is not strictly necessary (because we have an Alloy signature for each metadata type), but it is used for convenience in writing predicate preconditions and postconditions.
   * **hashes**: some Hash-- Various parts of full verification (5.4.4.2) involve cross-checking metadata hashes. For example, "Check that the non-custom metadata (i.e., length and hashes) of the unencrypted or encrypted image are the same in both sets of metadata" (page 30) and "Check the previously downloaded Snapshot metadata file from the Directory repository (if available). If the hashes and version number of that file match the hashes and version number listed in the new Timestamp metadata, there are no new updates and the verification process MAY be stopped and considered complete." Strictly speaking, we only need hashes for snapshot and targets metadata (as far as I can tell). But, it makes the most sense to me to include **hashes** as a general Metadata field, as it is needed by multiple types of Metadata and in theory, any type of Metadata can have one or more hashes.
+  * **source**-- Metadata can be downloaded/sent from the Image and Director Repositories, and during Full Verification, it is necessary to know which repository each metadata file came from: E.g., "Verify that Targets metadata from the Director and Image repositories match" 
+  (section 5.4.4.2, page 30).
   * RootMetadata
     * **key_mapping**: Role lone -> some MetadataKey-- Section 5.2.2 page 14: Root metadata should contain "A representation of the public keys for all four roles." The public keys are checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). 
     * **signature_count_mapping**: Role -> one SignatureCount-- Section 5.2.2 page 14: Root metadata should contain "An attribute mapping each role to ... the threshold of signatures required for that role." Signature counts are checked during Full Verification (section 5.4.4.2, also see the **FullVerification** predicate). 
