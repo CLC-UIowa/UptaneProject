@@ -152,5 +152,6 @@ and signing roles on each repository."
 
 ## Questions
 * Does the sending of metadata from the Director to the Primary ECU happen all at once, in batch? Or does the metadata get sent file by file as the ECU undergoes verification? Compare the "directing installation" section to the "full verification" section.
+* The ECU receives metadata from both the Director and Image repos, but which metadata should the "current_metadata" be? One or the other? Both? When should metadata be deleted?
 * In the Uptane standard, there is a lot of flexibility for secondary ECUs (from full verification to checking just a single metadata file). Should the model be this flexible?  
 * How course-grained should the FullVerification predicate be? The Uptane standard says that if a step of verification fails, then the process is terminated and an error code is returned-- but in this model, verification only happens if preconditions are fulfilled.

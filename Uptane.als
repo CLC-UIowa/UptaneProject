@@ -8,6 +8,8 @@ open util/ordering[MyTime]
 -- * Manually using MyTime and TimeServer sigs
 -- * Distinction between sending and downloading metadata
 -- * When should new_metadata field be updated-- all at once or one at a time?
+-- * TODO: Make Track just a diagnostic tool (move some relations out)
+-- * TODO: Should we keep old metadata files for if stuff gets deleted?
 -- * TODO: Partial verification
 -- * TODO: Vehicle version manifests (?) Maybe we can assume the repos know which images/metadata to send
 -- * TODO: Targets metadata delegations and custom info
@@ -18,6 +20,7 @@ open util/ordering[MyTime]
 -- * TODO: Option of having prior metadata not exist
 -- * TODO: Initial state conditions
 -- * TODO: Revisit snapshot full verification
+-- * TODO: Keep track of previous metadata
 
 
 
@@ -40,6 +43,7 @@ abstract sig ECU {
 	var new_metadata: set Metadata,
 	var current_image: Image,
 	var new_image: Image,
+	var status: Status, 
 }
 one sig PrimaryECU extends ECU {
 	-- current message vs message log
@@ -82,8 +86,9 @@ sig InventoryDatabaseEntry {
 --- Files ---
 -------------
 --sig Filename {}
-sig Image {}
-
+sig Image {
+	i_hashes: some Hash,
+}
 
 ----------------------
 --- Authentication ---
@@ -171,12 +176,10 @@ enum Status { Abort, Success }
 
 one sig Track { 
 	var op: lone Operator,
-	var status: Status, -- NOTE: Move to ECU
 	var verification_repo: lone Repository, -- NOTE: Move to ECU
 }
 
 pred TrackFrameConditions[] {
-	Track.status' = Track.status 
 	Track.verification_repo' = Track.verification_repo
 }
 
@@ -237,6 +240,7 @@ pred SendMetadataToSecondaries[p: PrimaryECU, S: set SecondaryECU] {
 	NoChangeExceptPrimary[out_secondaries, p]
 	NoChangeExceptPrimary[current_image, none]
 	NoChangeExceptPrimary[new_image, none]
+	NoChangeExceptPrimary[status, none]
 	TrackFrameConditions[]
 }
 
@@ -274,7 +278,7 @@ pred FullVerificationTargetsMatch[p: PrimaryECU] {
 	--- Preconditions ---
 	---------------------
 	Track.op = FullVerificationTargets
-	Track.status = Success
+	p.status = Success
 	Track.verification_repo = ImageRepo
 	
 
@@ -292,9 +296,9 @@ pred FullVerificationTargetsMatch[p: PrimaryECU] {
 		((p.new_metadata & TargetsMetadata) & (source.ImageRepo)).image_filesizes 
 	)
 	implies
-	Track.status' = Success
+	p.status' = Success
 	else
-	Track.status' = Abort
+	p.status' = Abort
 	
 
 	Track.op' = FullVerificationTargetsMatch
@@ -315,7 +319,7 @@ pred FullVerificationTargets[p: PrimaryECU, t: TargetsMetadata] {
 	--- Preconditions ---
 	---------------------
 	Track.op = FullVerificationSnapshot
-	Track.status = Success
+	p.status = Success
 
 	-- Source repo matches
 	Track.verification_repo = DirectorRepo implies t.source = DirectorRepo
@@ -346,9 +350,9 @@ pred FullVerificationTargets[p: PrimaryECU, t: TargetsMetadata] {
 			t.version = (p.current_metadata & SnapshotMetadata).targets_info[t]
 	)
 	implies
-	Track.status' = Success
+	p.status' = Success
 	else
-	Track.status' = Abort
+	p.status' = Abort
 
 	Track.verification_repo = DirectorRepo implies Track.verification_repo' = DirectorRepo
 	Track.verification_repo = ImageRepo    implies Track.verification_repo' = ImageRepo
@@ -372,7 +376,7 @@ pred FullVerificationTimestamp[p: PrimaryECU, t: TimestampMetadata] {
 	--- Preconditions ---
 	---------------------
 	Track.op = FullVerificationRoot
-	Track.status = Success
+	p.status = Success
 
 	-- Source repo matches
 	Track.verification_repo = DirectorRepo implies t.source = DirectorRepo
@@ -391,9 +395,9 @@ pred FullVerificationTimestamp[p: PrimaryECU, t: TimestampMetadata] {
 									 (p.current_metadata & RootMetadata)]
 	)
 	implies
-	Track.status' = Success
+	p.status' = Success
 	else
-	Track.status' = Abort
+	p.status' = Abort
 
 	Track.verification_repo = DirectorRepo implies Track.verification_repo' = DirectorRepo
 	Track.verification_repo = ImageRepo    implies Track.verification_repo' = ImageRepo
@@ -417,7 +421,7 @@ pred FullVerificationSnapshot[p: PrimaryECU, s: SnapshotMetadata] {
 	--- Preconditions ---
 	---------------------
 	Track.op = FullVerificationTimestamp
-	Track.status = Success
+	p.status = Success
 
 	-- Source repo matches
 	Track.verification_repo = DirectorRepo implies s.source = DirectorRepo
@@ -466,9 +470,9 @@ pred FullVerificationSnapshot[p: PrimaryECU, s: SnapshotMetadata] {
 			]	
 	)
 	implies
-	Track.status' = Success
+	p.status' = Success
 	else
-	Track.status' = Abort
+	p.status' = Abort
 
 	Track.verification_repo = DirectorRepo implies Track.verification_repo' = DirectorRepo
 	Track.verification_repo = ImageRepo    implies Track.verification_repo' = ImageRepo
@@ -496,7 +500,7 @@ pred FullVerificationRoot[p: PrimaryECU, r: RootMetadata] {
 	---------------------
 	-- Impose the correct order of steps in FullVerification
 	Track.verification_repo = none or 
-	(Track.op = FullVerificationTargets and Track.status = Success and Track.verification_repo = DirectorRepo)
+	(Track.op = FullVerificationTargets and p.status = Success and Track.verification_repo = DirectorRepo)
 
 	-- Source repo matches
 	Track.verification_repo = none         implies r.source = DirectorRepo
@@ -545,9 +549,9 @@ pred FullVerificationRoot[p: PrimaryECU, r: RootMetadata] {
 		
 		)
 		implies
-		Track.status' = Success
+		p.status' = Success
 		else
-		Track.status' = Abort
+		p.status' = Abort
 	
 
 
@@ -560,14 +564,14 @@ pred FullVerificationRoot[p: PrimaryECU, r: RootMetadata] {
 		(p.current_metadata' & RootMetadata) = r 
 	
 		-- If Timestamp or Snapshot keys have been rotated, delete those metadata files
-		(r.key_mapping[Timestamp] !=
-		(p.current_metadata & RootMetadata).key_mapping[Timestamp]) =>
+	   ((r.key_mapping[Timestamp] !=
+		(p.current_metadata & RootMetadata).key_mapping[Timestamp])) implies
 		(p.current_metadata' & TimestampMetadata) = none
 
 
 	
-		(r.key_mapping[Snapshot] !=
-		(p.current_metadata & RootMetadata).key_mapping[Snapshot]) =>
+	   ((r.key_mapping[Snapshot] !=
+		(p.current_metadata & RootMetadata).key_mapping[Snapshot])) implies
 		(p.current_metadata' & SnapshotMetadata) = none
 	
 
@@ -610,7 +614,7 @@ pred FullVerification[p: PrimaryECU] {
 	--- Preconditions ---
 	---------------------
 	Track.op = FullVerificationTargetsMatch
-	Track.status = Success
+	p.status = Success
 
 	----------------------
 	--- Postconditions ---
@@ -634,6 +638,12 @@ pred PartialVerification[s: SecondaryECU] {
 	DoNothing[]
 }
 
+pred VerifyImage[e: ECU, i: Image] {
+	-- Check that hashes in the image match hashes in targets metadata
+	let t = ((e.current_metadata & TargetsMetadata) & source.DirectorRepo) |
+		t.image_hashes[i] = i.i_hashes
+}
+
 pred DoNothing[] {
 	out_primary' = out_primary
 	out_secondaries' = out_secondaries
@@ -642,8 +652,8 @@ pred DoNothing[] {
 	current_image' = current_image
 	new_image' = new_image
 	Track.op' = DoNothing
-	Track.status' = Track.status
-	Track.verification_repo' = Track.verification_repo
+	status' = status
+	verification_repo' = verification_repo
 }
 
 -------------------------------
@@ -658,7 +668,7 @@ pred Init [] {
 
 	no Track.verification_repo
 	no Track.op
-	Track.status = Success
+	PrimaryECU.status = Success
 
 	
 }
