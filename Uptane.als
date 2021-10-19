@@ -21,6 +21,17 @@ open util/ordering[MyTime]
 -- * TODO: Initial state conditions
 -- * TODO: Revisit snapshot full verification
 -- * TODO: Keep track of previous metadata
+-- * TODO: Split up SendMetadataToPrimary
+
+/*
+This week:
+
+Image verification
+Moving stuff out of Track
+Investigating reference implementation
+Slides
+Added option of prior metadata not existing
+*/
 
 
 
@@ -37,6 +48,7 @@ one sig ImageRepo extends Repository  {
 	--database: set Image,
 	--var out_primary: set Metadata,
 }
+sig HardwareID {}
 abstract sig ECU {
 	--key: ECUKey,
 	var current_metadata: set Metadata,
@@ -44,6 +56,7 @@ abstract sig ECU {
 	var current_image: Image,
 	var new_image: Image,
 	var status: Status, 
+	hardware_id: HardwareID
 }
 one sig PrimaryECU extends ECU {
 	-- current message vs message log
@@ -123,11 +136,17 @@ sig RootMetadata extends Metadata {
 	signature_count_mapping: Role -> one SignatureCount
 	-- can add additional fields for delegations roles if necessary
 }
+sig ReleaseCounter {}
 sig TargetsMetadata extends Metadata {
 	image_hashes: Image -> some Hash,
 	image_filesizes: Image -> one FileSize,
 	delegations: lone DelegationsMetadata,
-	-- ECU INFO?
+	custom_metadata: Image -> CustomMetadata
+}
+sig CustomMetadata {
+	ecu_id: ECU,
+	hardware_ids: some HardwareID,
+	release_count: Version,
 }
 sig SnapshotMetadata extends Metadata {
 	targets_info: TargetsMetadata -> one Version, -- maybe lone?
@@ -638,10 +657,32 @@ pred PartialVerification[s: SecondaryECU] {
 	DoNothing[]
 }
 
-pred VerifyImage[e: ECU, i: Image] {
+pred VerifyImage[e: ECU, i: Image, t: TargetsMetadata] {
+	-- i is the new image on e
+	e.new_image = i
+	
+	-- t is the latest targets metadata file from the Director repo
+	t in ((e.current_metadata & TargetsMetadata) & source.DirectorRepo)
+
+	-- Find the Targets metadata associated with this ECU identifier
+    -- and check that the hardware identifier in the metadata matches 
+    -- the ECU’s hardware identifier.
+	one c: t.custom_metadata[Image] | c.ecu_id = e
+	all c: t.custom_metadata[Image] | c.ecu_id = e implies e.hardware_id in c.hardware_ids
+
+	-- Check that the release counter of the image in the previous metadata, 
+    -- if it exists, is less than or equal to the release counter in the latest metadata.
+
 	-- Check that hashes in the image match hashes in targets metadata
-	let t = ((e.current_metadata & TargetsMetadata) & source.DirectorRepo) |
-		t.image_hashes[i] = i.i_hashes
+	t.image_hashes[i] = i.i_hashes
+}
+
+pred SendVehicleVersionManifest[e: ECU] {
+
+}
+
+pred SendECUVersionReport[s: SecondaryECU] {
+
 }
 
 pred DoNothing[] {
