@@ -22,6 +22,7 @@ open util/ordering[MyTime]
 -- * TODO: Revisit snapshot full verification
 -- * TODO: Keep track of previous metadata
 -- * TODO: Split up SendMetadataToPrimary
+-- * TODO: Update frame conditions (cmd F for "var")
 
 /*
 This week:
@@ -43,6 +44,12 @@ abstract sig Repository {
 	var out_primary: set Metadata,
 }
 one sig DirectorRepo extends Repository {
+	inventory_database: InventoryDatabase,
+	var vehicle_version_manifests: set VehicleVersionManifest,
+}
+one sig InventoryDatabase {
+	ecus: set ECU,
+	-- other stuff
 }
 one sig ImageRepo extends Repository  {
 	--database: set Image,
@@ -56,13 +63,13 @@ abstract sig ECU {
 	var current_image: Image,
 	var new_image: Image,
 	var status: Status, 
-	hardware_id: HardwareID
+	var version_report: ECUVersionReport,
+	hardware_id: HardwareID,
 }
 one sig PrimaryECU extends ECU {
-	-- current message vs message log
-	-- snapshot vs whole system
-	--out_repo: Message -> lone Repository,
 	var out_secondaries: set Metadata,
+	var vehicle_version_manifest: VehicleVersionManifest,
+	var all_version_reports: set ECUVersionReport,
 	--verification: VerificationType,
     -- repo mapping file
 }
@@ -79,16 +86,18 @@ sig KeyID extends ID {}
 
 --- Vehicle and ECU Data ---
 sig ECUVersionReport {
-	--signatures: set Signature,
-	--id: ECUId,
-	--image_file: Image,
-	--image_hash: Hash, 
+	signatures: set Signature,
+	id: ECUId,
+	image_file: Image,
+	image_hash: Hash, 
+	version: Version,
+	latest_time: MyTime,
 }
 sig VehicleVersionManifest {
-	--signatures: set Signature,
-	--vehicle_id: VehicleID,
-	--ecu_id: ECUId,
-	--version_report: set ECUVersionReport,
+	signatures: set Signature,
+	vehicle_id: VehicleID,
+	ecu_id: ECUId,
+	version_report: set ECUVersionReport,
 }
 sig InventoryDatabaseEntry {
 	--vehicle_id: VehicleID,
@@ -190,6 +199,7 @@ enum Operator { SendMetadataToPrimary, SendMetadataToSecondaries,
                 FullVerification, FullVerificationTargetsMatch,
                 FullVerificationRoot, FullVerificationTargets, 
                 FullVerificationTimestamp, FullVerificationSnapshot,
+				VerifyImage, SendVehicleVersionManifest, SendECUVersionReport,
                 DoNothing }
 enum Status { Abort, Success }
 
@@ -658,6 +668,9 @@ pred PartialVerification[s: SecondaryECU] {
 }
 
 pred VerifyImage[e: ECU, i: Image, t: TargetsMetadata] {
+	---------------------
+	--- Preconditions ---
+	---------------------
 	-- i is the new image on e
 	e.new_image = i
 	
@@ -675,14 +688,66 @@ pred VerifyImage[e: ECU, i: Image, t: TargetsMetadata] {
 
 	-- Check that hashes in the image match hashes in targets metadata
 	t.image_hashes[i] = i.i_hashes
+
+
+	----------------------
+	--- Postconditions ---
+	----------------------
+	e.current_image' = e.new_image
+
+	------------------------
+	--- Frame Conditions ---
+	------------------------
+	NoChangeExceptDirector[out_primary, none]
+	NoChangeExceptPrimary[current_metadata, none]
+	NoChangeExceptPrimary[new_metadata, none]
+	NoChangeExceptPrimary[out_secondaries, none]
+	NoChangeExceptPrimary[current_image, none]
+	NoChangeExceptPrimary[new_image, none]
 }
 
-pred SendVehicleVersionManifest[e: ECU] {
+pred SendVehicleVersionManifest[p: PrimaryECU] {
+	---------------------
+	--- Preconditions ---
+	---------------------
+	-- none for now
 
+	----------------------
+	--- Postconditions ---
+	----------------------
+	p.vehicle_version_manifest in DirectorRepo.vehicle_version_manifests'
+
+	------------------------
+	--- Frame Conditions ---
+	------------------------
+	NoChangeExceptDirector[out_primary, none]
+	NoChangeExceptPrimary[current_metadata, none]
+	NoChangeExceptPrimary[new_metadata, none]
+	NoChangeExceptPrimary[out_secondaries, none]
+	NoChangeExceptPrimary[current_image, none]
+	NoChangeExceptPrimary[new_image, none]
 }
 
 pred SendECUVersionReport[s: SecondaryECU] {
+	---------------------
+	--- Preconditions ---
+	---------------------
+	-- none for now
 
+	----------------------
+	--- Postconditions ---
+	----------------------
+	s.version_report in PrimaryECU.all_version_reports'
+
+	------------------------
+	--- Frame Conditions ---
+	------------------------
+	NoChangeExceptDirector[out_primary, none]
+	NoChangeExceptPrimary[current_metadata, none]
+	NoChangeExceptPrimary[new_metadata, none]
+	NoChangeExceptPrimary[out_secondaries, none]
+	NoChangeExceptPrimary[current_image, none]
+	NoChangeExceptPrimary[new_image, none]
 }
 
 pred DoNothing[] {
@@ -733,6 +798,10 @@ pred Trans [] {
 
 	or
        
+	--(some e: ECU | some i : Image | some t: TargetsMetadata | VerifyImage[e, i, t]) or
+	--SendVehicleVersionManifest[PrimaryECU] or
+	--(some s: SecondaryECU | SendECUVersionReport[s]) or
+
 	DoNothing[]
 }
 
