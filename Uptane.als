@@ -97,7 +97,7 @@ sig VehicleVersionManifest {
 	signatures: set Signature,
 	vehicle_id: VehicleID,
 	ecu_id: ECUId,
-	version_report: set ECUVersionReport,
+	version_reports: set ECUVersionReport,
 }
 sig InventoryDatabaseEntry {
 	--vehicle_id: VehicleID,
@@ -219,7 +219,7 @@ pred NoChangeExceptDirector[r: DirectorRepo -> univ, D: set DirectorRepo] {
 */
 
 pred NoChangeExceptRepo[r: Repository -> univ, R: set Repository] {
-	all r: Repository - R | r.r' = r.r
+	all rep: Repository - R | rep.r' = rep.r
 }
 
 /*
@@ -228,7 +228,7 @@ pred NoChangeExceptPrimary[r: PrimaryECU -> univ, P: set PrimaryECU] {
 }
 */
 
-pred NoChangeExceptECU[e: ECU -> univ, E: set ECU] {
+pred NoChangeExceptECU[r: ECU -> univ, E: set ECU] {
 	all e: ECU - E | e.r' = e.r
 }
 
@@ -695,7 +695,7 @@ pred FullVerification[p: PrimaryECU] {
 	------------------------
 	--- Frame Conditions ---
 	------------------------
-	NoChangeExcepRepo[out_primary, none]
+	NoChangeExceptRepo[out_primary, none]
 	NoChangeExceptRepo[vehicle_version_manifests, none]
 	NoChangeExceptECU[current_metadata, p]
 	NoChangeExceptECU[new_metadata, none]
