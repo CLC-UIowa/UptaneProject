@@ -65,6 +65,7 @@ abstract sig ECU {
 	var status: Status, 
 	var version_report: ECUVersionReport,
 	hardware_id: HardwareID,
+	var verification_repo: lone Repository, -- moved from Track
 }
 one sig PrimaryECU extends ECU {
 	var out_secondaries: set Metadata,
@@ -205,11 +206,11 @@ enum Status { Abort, Success }
 
 one sig Track { 
 	var op: lone Operator,
-	var verification_repo: lone Repository, -- NOTE: Move to ECU
+
 }
 
 pred TrackFrameConditions[] {
-	Track.verification_repo' = Track.verification_repo
+	--Track.verification_repo' = Track.verification_repo (removed from Track)
 }
 
 /*
@@ -328,7 +329,7 @@ pred FullVerificationTargetsMatch[p: PrimaryECU] {
 	---------------------
 	Track.op = FullVerificationTargets
 	p.status = Success
-	Track.verification_repo = ImageRepo
+	p.verification_repo = ImageRepo
 	
 
 	----------------------
@@ -351,7 +352,7 @@ pred FullVerificationTargetsMatch[p: PrimaryECU] {
 	
 
 	Track.op' = FullVerificationTargetsMatch
-	Track.verification_repo' = none
+	p.verification_repo' = none
 	------------------------
 	--- Frame Conditions ---
 	------------------------
@@ -375,8 +376,8 @@ pred FullVerificationTargets[p: PrimaryECU, t: TargetsMetadata] {
 	p.status = Success
 
 	-- Source repo matches
-	Track.verification_repo = DirectorRepo implies t.source = DirectorRepo
-	Track.verification_repo = ImageRepo    implies t.source = ImageRepo
+	p.verification_repo = DirectorRepo implies t.source = DirectorRepo
+	p.verification_repo = ImageRepo    implies t.source = ImageRepo
 
 	-- s is in the new_metadata field
 	t in p.new_metadata
@@ -407,8 +408,8 @@ pred FullVerificationTargets[p: PrimaryECU, t: TargetsMetadata] {
 	else
 	p.status' = Abort
 
-	Track.verification_repo = DirectorRepo implies Track.verification_repo' = DirectorRepo
-	Track.verification_repo = ImageRepo    implies Track.verification_repo' = ImageRepo
+	p.verification_repo = DirectorRepo implies p.verification_repo' = DirectorRepo
+	p.verification_repo = ImageRepo    implies p.verification_repo' = ImageRepo
 
 	Track.op' = FullVerificationTargets
 
@@ -436,8 +437,8 @@ pred FullVerificationTimestamp[p: PrimaryECU, t: TimestampMetadata] {
 	p.status = Success
 
 	-- Source repo matches
-	Track.verification_repo = DirectorRepo implies t.source = DirectorRepo
-	Track.verification_repo = ImageRepo    implies t.source = ImageRepo
+	p.verification_repo = DirectorRepo implies t.source = DirectorRepo
+	p.verification_repo = ImageRepo    implies t.source = ImageRepo
 
 	-- s is in the new_metadata field
 	t in p.new_metadata
@@ -456,8 +457,8 @@ pred FullVerificationTimestamp[p: PrimaryECU, t: TimestampMetadata] {
 	else
 	p.status' = Abort
 
-	Track.verification_repo = DirectorRepo implies Track.verification_repo' = DirectorRepo
-	Track.verification_repo = ImageRepo    implies Track.verification_repo' = ImageRepo
+	p.verification_repo = DirectorRepo implies p.verification_repo' = DirectorRepo
+	p.verification_repo = ImageRepo    implies p.verification_repo' = ImageRepo
 
 	Track.op' = FullVerificationTimestamp
 
@@ -485,8 +486,8 @@ pred FullVerificationSnapshot[p: PrimaryECU, s: SnapshotMetadata] {
 	p.status = Success
 
 	-- Source repo matches
-	Track.verification_repo = DirectorRepo implies s.source = DirectorRepo
-	Track.verification_repo = ImageRepo    implies s.source = ImageRepo
+	p.verification_repo = DirectorRepo implies s.source = DirectorRepo
+	p.verification_repo = ImageRepo    implies s.source = ImageRepo
 
 	-- s is in the new_metadata field
 	s in p.new_metadata
@@ -535,8 +536,8 @@ pred FullVerificationSnapshot[p: PrimaryECU, s: SnapshotMetadata] {
 	else
 	p.status' = Abort
 
-	Track.verification_repo = DirectorRepo implies Track.verification_repo' = DirectorRepo
-	Track.verification_repo = ImageRepo    implies Track.verification_repo' = ImageRepo
+	p.verification_repo = DirectorRepo implies p.verification_repo' = DirectorRepo
+	p.verification_repo = ImageRepo    implies p.verification_repo' = ImageRepo
 
 	Track.op' = FullVerificationSnapshot
 
@@ -564,12 +565,12 @@ pred FullVerificationRoot[p: PrimaryECU, r: RootMetadata] {
 	--- Preconditions ---
 	---------------------
 	-- Impose the correct order of steps in FullVerification
-	Track.verification_repo = none or 
-	(Track.op = FullVerificationTargets and p.status = Success and Track.verification_repo = DirectorRepo)
+	p.verification_repo = none or 
+	(Track.op = FullVerificationTargets and p.status = Success and p.verification_repo = DirectorRepo)
 
 	-- Source repo matches
-	Track.verification_repo = none         implies r.source = DirectorRepo
-	Track.verification_repo = DirectorRepo implies r.source = ImageRepo
+	p.verification_repo = none         implies r.source = DirectorRepo
+	p.verification_repo = DirectorRepo implies r.source = ImageRepo
 
 	-- r is in the new_metadata field
 	r in p.new_metadata
@@ -620,8 +621,8 @@ pred FullVerificationRoot[p: PrimaryECU, r: RootMetadata] {
 	
 
 
-		r.source = DirectorRepo implies Track.verification_repo' = DirectorRepo 
-		r.source = ImageRepo    implies Track.verification_repo' = ImageRepo
+		r.source = DirectorRepo implies p.verification_repo' = DirectorRepo 
+		r.source = ImageRepo    implies p.verification_repo' = ImageRepo
 
 
 		
@@ -690,7 +691,7 @@ pred FullVerification[p: PrimaryECU] {
 	----------------------
 	p.current_metadata' = p.new_metadata
 	Track.op' = FullVerification
-	Track.verification_repo' = none
+	p.verification_repo' = none
 	
 	------------------------
 	--- Frame Conditions ---
@@ -837,11 +838,9 @@ pred Init [] {
 	--one (PrimaryECU.current_metadata & TargetsMetadata)
 	--one (PrimaryECU.current_metadata & SnapshotMetadata)
 
-	no Track.verification_repo
+	no ECU.verification_repo
 	no Track.op
-	PrimaryECU.status = Success
-
-	
+	ECU.status = Success
 }
 
 ---------------------------
