@@ -199,7 +199,7 @@ enum Operator { SendMetadataToPrimary, SendMetadataToSecondaries,
                 FullVerification, FullVerificationTargetsMatch,
                 FullVerificationRoot, FullVerificationTargets, 
                 FullVerificationTimestamp, FullVerificationSnapshot,
-				VerifyImage, SendVehicleVersionManifest, SendECUVersionReport,
+			         	VerifyImage, SendVehicleVersionManifest, SendECUVersionReport,
                 DoNothing }
 enum Status { Abort, Success }
 
@@ -212,12 +212,24 @@ pred TrackFrameConditions[] {
 	Track.verification_repo' = Track.verification_repo
 }
 
+/*
 pred NoChangeExceptDirector[r: DirectorRepo -> univ, D: set DirectorRepo] {
 	all d: DirectorRepo - D | d.r' = d.r
 }
+*/
 
+pred NoChangeExceptRepo[r: Repository -> univ, R: set Repository] {
+	all r: Repository - R | r.r' = r.r
+}
+
+/*
 pred NoChangeExceptPrimary[r: PrimaryECU -> univ, P: set PrimaryECU] {
 	all p: PrimaryECU - P | p.r' = p.r
+}
+*/
+
+pred NoChangeExceptECU[e: ECU -> univ, E: set ECU] {
+	all e: ECU - E | e.r' = e.r
 }
 
 pred SendMetadataToPrimary[r: Repository, p: PrimaryECU] {
@@ -237,13 +249,17 @@ pred SendMetadataToPrimary[r: Repository, p: PrimaryECU] {
 	Track.op' = SendMetadataToPrimary
 
 	--- Frame conditions ---
-	NoChangeExceptDirector[out_primary, r]
-	NoChangeExceptPrimary[current_metadata, none]
-	NoChangeExceptPrimary[new_metadata, p]	
-	NoChangeExceptPrimary[out_secondaries, none]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
+	NoChangeExceptRepo[out_primary, r]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata, none]
+	NoChangeExceptECU[new_metadata, p]	
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
 	TrackFrameConditions[]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
 }
 
 pred SendMetadataToSecondaries[p: PrimaryECU, S: set SecondaryECU] {
@@ -263,14 +279,18 @@ pred SendMetadataToSecondaries[p: PrimaryECU, S: set SecondaryECU] {
 	Track.op' = SendMetadataToSecondaries
 
 	--- Frame conditions ---
-	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata, none]
-	NoChangeExceptPrimary[new_metadata, none]
-	NoChangeExceptPrimary[out_secondaries, p]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
-	NoChangeExceptPrimary[status, none]
+	NoChangeExceptRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata, none]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+	NoChangeExceptECU[status, none]
+	NoChangeExceptECU[out_secondaries, p]
 	TrackFrameConditions[]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
 }
 
 pred FullVerificationPreconditions[p: PrimaryECU, m1: lone Metadata, m2: Metadata, root: RootMetadata] {
@@ -335,12 +355,16 @@ pred FullVerificationTargetsMatch[p: PrimaryECU] {
 	------------------------
 	--- Frame Conditions ---
 	------------------------
-	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata, none]
-	NoChangeExceptPrimary[new_metadata, none]
-	NoChangeExceptPrimary[out_secondaries, none]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
+	NoChangeExceptRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata, none]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+  NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
 } 
 
 pred FullVerificationTargets[p: PrimaryECU, t: TargetsMetadata] {
@@ -392,12 +416,16 @@ pred FullVerificationTargets[p: PrimaryECU, t: TargetsMetadata] {
 	------------------------
 	--- Frame Conditions ---
 	------------------------
-	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata,none]
-	NoChangeExceptPrimary[new_metadata, none]
-	NoChangeExceptPrimary[out_secondaries, none]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
+	NoChangeExceptRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata,none]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
 }
 
 pred FullVerificationTimestamp[p: PrimaryECU, t: TimestampMetadata] {
@@ -436,12 +464,16 @@ pred FullVerificationTimestamp[p: PrimaryECU, t: TimestampMetadata] {
 	------------------------
 	--- Frame Conditions ---
 	------------------------
-	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata,none]
-	NoChangeExceptPrimary[new_metadata, none]
-	NoChangeExceptPrimary[out_secondaries, none]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
+	NoChangeExceptRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata,none]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
 }
 
 pred FullVerificationSnapshot[p: PrimaryECU, s: SnapshotMetadata] {
@@ -512,12 +544,16 @@ pred FullVerificationSnapshot[p: PrimaryECU, s: SnapshotMetadata] {
 	--- Frame Conditions ---
 	------------------------
 
-	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata,none]
-	NoChangeExceptPrimary[new_metadata, none]
-	NoChangeExceptPrimary[out_secondaries, none]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
+	NoChangeExceptRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata,none]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
 }
 
 pred FullVerificationRoot[p: PrimaryECU, r: RootMetadata] {
@@ -612,12 +648,16 @@ pred FullVerificationRoot[p: PrimaryECU, r: RootMetadata] {
 	--- Frame Conditions ---
 	------------------------
 
-	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata,p]
-	NoChangeExceptPrimary[new_metadata, none]
-	NoChangeExceptPrimary[out_secondaries, none]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
+	NoChangeExceptRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata,p]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
 }
 
 pred FullVerification[p: PrimaryECU] {
@@ -655,12 +695,16 @@ pred FullVerification[p: PrimaryECU] {
 	------------------------
 	--- Frame Conditions ---
 	------------------------
-	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata, p]
-	NoChangeExceptPrimary[new_metadata, none]
-	NoChangeExceptPrimary[out_secondaries, none]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
+	NoChangeExcepRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata, p]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
 }
 
 pred PartialVerification[s: SecondaryECU] {
@@ -698,12 +742,16 @@ pred VerifyImage[e: ECU, i: Image, t: TargetsMetadata] {
 	------------------------
 	--- Frame Conditions ---
 	------------------------
-	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata, none]
-	NoChangeExceptPrimary[new_metadata, none]
-	NoChangeExceptPrimary[out_secondaries, none]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
+	NoChangeExceptRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata, none]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
 }
 
 pred SendVehicleVersionManifest[p: PrimaryECU] {
@@ -720,12 +768,16 @@ pred SendVehicleVersionManifest[p: PrimaryECU] {
 	------------------------
 	--- Frame Conditions ---
 	------------------------
-	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata, none]
-	NoChangeExceptPrimary[new_metadata, none]
-	NoChangeExceptPrimary[out_secondaries, none]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
+	NoChangeExceptRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, DirectorRepo]
+	NoChangeExceptECU[current_metadata, none]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
 }
 
 pred SendECUVersionReport[s: SecondaryECU] {
@@ -742,23 +794,36 @@ pred SendECUVersionReport[s: SecondaryECU] {
 	------------------------
 	--- Frame Conditions ---
 	------------------------
-	NoChangeExceptDirector[out_primary, none]
-	NoChangeExceptPrimary[current_metadata, none]
-	NoChangeExceptPrimary[new_metadata, none]
-	NoChangeExceptPrimary[out_secondaries, none]
-	NoChangeExceptPrimary[current_image, none]
-	NoChangeExceptPrimary[new_image, none]
+	NoChangeExceptRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata, none]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, PrimaryECU]
 }
 
 pred DoNothing[] {
+	-- Repo
 	out_primary' = out_primary
-	out_secondaries' = out_secondaries
+	vehicle_version_manifests' = vehicle_version_manifests
+	
+	-- ECU
 	current_metadata' = current_metadata
 	new_metadata' = new_metadata
 	current_image' = current_image
 	new_image' = new_image
-	Track.op' = DoNothing
 	status' = status
+	version_report' = version_report
+	out_secondaries' = out_secondaries
+	vehicle_version_manifest' = vehicle_version_manifest
+	all_version_reports' = all_version_reports
+
+	-- Track
+	Track.op' = DoNothing
 	verification_repo' = verification_repo
 }
 
@@ -782,6 +847,14 @@ pred Init [] {
 ---------------------------
 --- Transition relation ---
 ---------------------------
+/* SendMetadataToPrimary, SendMetadataToSecondaries, 
+   FullVerification, FullVerificationTargetsMatch,
+   FullVerificationRoot, FullVerificationTargets, 
+   FullVerificationTimestamp, FullVerificationSnapshot,
+	 VerifyImage, SendVehicleVersionManifest, SendECUVersionReport,
+   DoNothing
+*/
+
 pred Trans [] {
 	SendMetadataToPrimary[DirectorRepo, PrimaryECU] or
 	SendMetadataToSecondaries[PrimaryECU, SecondaryECU] or
