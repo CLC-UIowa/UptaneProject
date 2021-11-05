@@ -8,34 +8,14 @@ open util/ordering[MyTime]
 -- * Manually using MyTime and TimeServer sigs
 -- * Distinction between sending and downloading metadata
 -- * When should new_metadata field be updated-- all at once or one at a time?
--- * TODO: Make Track just a diagnostic tool (move some relations out)
--- * TODO: Should we keep old metadata files for if stuff gets deleted?
--- * TODO: Partial verification
--- * TODO: Vehicle version manifests (?) Maybe we can assume the repos know which images/metadata to send
+-- * TODO: Keep old metadata files
 -- * TODO: Targets metadata delegations and custom info
--- * TODO: NoChangeExcept Primary AND secondary ECUs
-
 -- * TODO: Image verification
 -- * TODO: Check current_metadata for each repo type
 -- * TODO: Option of having prior metadata not exist
 -- * TODO: Initial state conditions
 -- * TODO: Revisit snapshot full verification
--- * TODO: Keep track of previous metadata
 -- * TODO: Split up SendMetadataToPrimary
--- * TODO: Update frame conditions (cmd F for "var")
-
-/*
-This week:
-
-Image verification
-Moving stuff out of Track
-Investigating reference implementation
-Slides
-Added option of prior metadata not existing
-*/
-
-
-
 
 -------------------------
 --- Components/actors ---
@@ -200,7 +180,8 @@ enum Operator { SendMetadataToPrimary, SendMetadataToSecondaries,
                 FullVerification, FullVerificationTargetsMatch,
                 FullVerificationRoot, FullVerificationTargets, 
                 FullVerificationTimestamp, FullVerificationSnapshot,
-			         	VerifyImage, SendVehicleVersionManifest, SendECUVersionReport,
+								PartialVerification,
+			         	VerifyAndInstallImage, SendVehicleVersionManifest, SendECUVersionReport,
                 DoNothing }
 enum Status { Abort, Success }
 
@@ -294,7 +275,7 @@ pred SendMetadataToSecondaries[p: PrimaryECU, S: set SecondaryECU] {
 	NoChangeExceptECU[all_version_reports, none]
 }
 
-pred FullVerificationPreconditions[p: PrimaryECU, m1: lone Metadata, m2: Metadata, root: RootMetadata] {
+pred FullVerificationPreconditions[e: ECU, m1: lone Metadata, m2: Metadata, root: RootMetadata] {
 	-- New metadata is not older version
 	(
 		no m1 or
@@ -400,8 +381,7 @@ pred FullVerificationTargets[p: PrimaryECU, t: TargetsMetadata] {
 
 		-- Target metadata version number should match the version number
 		-- listed in snapshot metadata
-		let t = (p.new_metadata & TargetsMetadata) |
-			t.version = (p.current_metadata & SnapshotMetadata).targets_info[t]
+		t.version = (p.current_metadata & SnapshotMetadata).targets_info[t]
 	)
 	implies
 	p.status' = Success
@@ -708,14 +688,66 @@ pred FullVerification[p: PrimaryECU] {
 	NoChangeExceptECU[all_version_reports, none]
 }
 
-pred PartialVerification[s: SecondaryECU] {
-	DoNothing[]
-}
-
-pred VerifyImage[e: ECU, i: Image, t: TargetsMetadata] {
+pred PartialVerification[s: SecondaryECU, t: TargetsMetadata] {
+	-- This is not ideal-- the code is mostly copy/pasted from
+	-- the FullVerificationTargets predicate.
 	---------------------
 	--- Preconditions ---
 	---------------------
+	-- Source is Director
+	t.source = DirectorRepo
+
+	-- s is in the new_metadata field
+	t in s.new_metadata
+
+	----------------------
+	--- Postconditions ---
+	----------------------
+	(
+		FullVerificationPreconditions[s, 
+                                 (s.current_metadata & TargetsMetadata),
+                                  t,
+								 	               (s.current_metadata & RootMetadata)]
+
+		and
+
+		-- Make sure there are targets
+		some t.image_hashes
+
+		and
+
+		-- Target metadata version number should match the version number
+		-- listed in snapshot metadata
+		t.version = (s.current_metadata & SnapshotMetadata).targets_info[t]
+	)
+	implies
+	s.status' = Success and t in s.current_metadata'
+	else
+	s.status' = Abort
+
+	Track.op' = PartialVerification
+
+	------------------------
+	--- Frame Conditions ---
+	------------------------
+	NoChangeExceptRepo[out_primary, none]
+	NoChangeExceptRepo[vehicle_version_manifests, none]
+	NoChangeExceptECU[current_metadata, s]
+	NoChangeExceptECU[new_metadata, none]
+	NoChangeExceptECU[out_secondaries, none]
+	NoChangeExceptECU[current_image, none]
+	NoChangeExceptECU[new_image, none]
+	NoChangeExceptECU[version_report, none]
+	NoChangeExceptECU[vehicle_version_manifest, none]
+	NoChangeExceptECU[all_version_reports, none]
+}
+
+pred VerifyAndInstallImage[e: ECU, i: Image, t: TargetsMetadata] {
+	---------------------
+	--- Preconditions ---
+	---------------------
+	-- i's metadata has already undergone verification
+	
 	-- i is the new image on e
 	e.new_image = i
 	
@@ -850,7 +882,7 @@ pred Init [] {
    FullVerification, FullVerificationTargetsMatch,
    FullVerificationRoot, FullVerificationTargets, 
    FullVerificationTimestamp, FullVerificationSnapshot,
-	 VerifyImage, SendVehicleVersionManifest, SendECUVersionReport,
+	 VerifyAndInstallImage, SendVehicleVersionManifest, SendECUVersionReport,
    DoNothing
 */
 
@@ -859,9 +891,8 @@ pred Trans [] {
 	SendMetadataToSecondaries[PrimaryECU, SecondaryECU] or
 	FullVerification[PrimaryECU] or
 	FullVerificationTargetsMatch[PrimaryECU] or
-	PartialVerification[SecondaryECU]
 
-	or
+	--or
 
 	(some r: RootMetadata | FullVerificationRoot[PrimaryECU, r]) or
 	(some t: TimestampMetadata | FullVerificationTimestamp[PrimaryECU, t]) or
@@ -870,9 +901,10 @@ pred Trans [] {
 
 	or
        
-	--(some e: ECU | some i : Image | some t: TargetsMetadata | VerifyImage[e, i, t]) or
+	--(some e: ECU | some i : Image | some t: TargetsMetadata | VerifyAndInstallImage[e, i, t]) or
 	--SendVehicleVersionManifest[PrimaryECU] or
 	--(some s: SecondaryECU | SendECUVersionReport[s]) or
+	some s: SecondaryECU | some t: TargetsMetadata | PartialVerification[s, t] or
 
 	DoNothing[]
 }
@@ -923,6 +955,8 @@ run {
 	eventually Track.op = FullVerificationTargetsMatch
 
 	eventually Track.op = FullVerification
+
+	eventually Track.op = PartialVerification
 } for 8 but 15 Time, 15 MyTime
 
 assert A_a {
